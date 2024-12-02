@@ -1,0 +1,82 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r}
+# Load libraries
+library(terra)
+library(tmap)
+library(sf)
+library(here)
+library(tidyverse)
+```
+
+
+# Load lidar data
+```{r}
+# digital surface model (all the top point returns)
+dsm <- rast(here("data","SJER2013_DSM.tif"))
+
+# digital terrain model (ground returns estimating ground elevation)
+dtm <- rast(here("data","SJER2013_DTM.tif"))
+
+# test if raster match, this will fail if they dont match
+test_raster <- c(dsm, dtm)
+
+# calculate canopy height model CHM
+chm <- dsm - dtm
+  
+```
+
+```{r}
+plot(chm)
+```
+
+
+# Load vegetation plot
+
+```{r}
+plot_centroids <- st_read(here("data","PlotCentroids","SJERPlotCentroids_Buffer.shp")) %>%
+  st_transform(.,crs = st_crs(chm))
+```
+
+```{r}
+tm_shape(chm) +
+  tm_raster(title = "Canopy height model(m)")  +
+  tm_shape(plot_centroids) + 
+  tm_polygons()
+```
+
+```{r}
+veg_surveys <- read_csv(here("data","VegetationData","D17_2013_vegStr.csv")) %>%
+  group_by(plotid) %>% 
+  summarise("survey_height" = max(stemheight, na.rm = TRUE)) # use max
+```
+
+```{r}
+# Extract lidar value from point geoms
+extract_chm_height <- terra::extract(chm, plot_centroids, fun = max) %>% # use max 
+rename(chm_height = SJER2013_DSM) %>%
+select(chm_height)
+
+```
+
+```{r}
+# combine the datasets
+plot_centroids <- cbind(plot_centroids, extract_chm_height) %>%
+  left_join(.,veg_surveys, by = c("Plot_ID" = "plotid"))
+```
+
+```{r}
+ggplot(plot_centroids, aes(x = chm_height, y = survey_height.y)) +
+  geom_point()+
+  geom_smooth(method = lm) + 
+  geom_abline(slope = 1, intercept = 0, alpha = 0.5, lty = 2) +
+  xlab("Maximum measured height (Lidar)") + 
+  ylab("Maximum measured height (survey)") + 
+  ggtitle("Validating Lidar Measurements")
+```
+
